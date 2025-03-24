@@ -12,7 +12,7 @@ CORS(app)
 
 # ✅ Load Supabase Environment Variables
 SUPABASE_DOMAIN = os.getenv("xejiiuswustskqkvnwsl.supabase.co")  # ✅ Updated Variable (No HTTPS)
-SUPABASE_SERVICE_KEY = os.getenv("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhlamlpdXN3dXN0c2txa3Zud3NsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDI4MjY3NzcsImV4cCI6MjA1ODQwMjc3N30.dHkcXRctuff7wIw-thXMS3nP1zJi3dK7u0o_5aTTs70")
+SUPABASE_SERVICE_KEY = os.getenv("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhlamlpdXN3dXN0c2txa3Zud3NsIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc0MjgyNjc3NywiZXhwIjoyMDU4NDAyNzc3fQ.SqAFAgEoOvIbN3T2cwDgNeUblzs8QDHBh-SUTXGXVbs")
 
 # ✅ Construct Full Supabase URL
 SUPABASE_URL = f"https://{SUPABASE_DOMAIN}"
