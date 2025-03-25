@@ -6,23 +6,21 @@ from flask import Flask, jsonify
 from flask_cors import CORS
 from supabase import create_client, Client
 
+# ✅ Set Supabase Credentials Correctly
+SUPABASE_URL = "https://xejiiuswustskqkvnwsl.supabase.co"  # Your Supabase URL
+SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")  # Fetch from Environment Variable
+
+# ✅ Validate Supabase Keys
+if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
+    raise ValueError("🚨 SUPABASE_DOMAIN or SUPABASE_SERVICE_KEY is missing!")
+
+# ✅ Initialize Supabase Client
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+print("✅ Connected to Supabase!")
+
 # ✅ Initialize Flask App
 app = Flask(__name__)
 CORS(app)
-
-# ✅ Load Supabase Environment Variables
-SUPABASE_DOMAIN = os.getenv("xejiiuswustskqkvnwsl.supabase.co")  # ✅ Updated Variable (No HTTPS)
-SUPABASE_SERVICE_KEY = os.getenv("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhlamlpdXN3dXN0c2txa3Zud3NsIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc0MjgyNjc3NywiZXhwIjoyMDU4NDAyNzc3fQ.SqAFAgEoOvIbN3T2cwDgNeUblzs8QDHBh-SUTXGXVbs")
-
-# ✅ Construct Full Supabase URL
-SUPABASE_URL = f"https://{SUPABASE_DOMAIN}"
-
-# ✅ Connect to Supabase
-if not SUPABASE_DOMAIN or not SUPABASE_SERVICE_KEY:
-    raise ValueError("🚨 SUPABASE_DOMAIN or SUPABASE_SERVICE_KEY is missing!")
-
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
-print("✅ Connected to Supabase!")
 
 # ✅ Function to Fetch Stock Price
 def get_stock_price(stock):
@@ -50,11 +48,19 @@ def get_stock_price(stock):
 def update_stock_prices():
     while True:
         try:
+            # ✅ Fetch Stocks from Supabase
             response = supabase.table("live_prices").select("stock").execute()
+            if response.data is None:
+                print("❌ No stocks found in Supabase!")
+                time.sleep(180)
+                continue  # Skip iteration if no stocks are found
+
             stocks = [row["stock"] for row in response.data]
 
+            # ✅ Fetch Live Stock Prices
             stock_data = {stock: get_stock_price(stock) for stock in stocks}
 
+            # ✅ Update Stocks in Supabase
             for stock, data in stock_data.items():
                 supabase.table("live_prices").upsert({
                     "stock": stock, 
@@ -68,11 +74,12 @@ def update_stock_prices():
         except Exception as e:
             print("❌ Error updating stock prices:", str(e))
 
-        time.sleep(180)  # ✅ Update every 3 minutes
+        time.sleep(180)  # ✅ Wait for 3 minutes before next update
 
-# ✅ Start Background Thread
+# ✅ Start Background Thread for Updating Stock Prices
 threading.Thread(target=update_stock_prices, daemon=True).start()
 
+# ✅ Flask Routes
 @app.route("/")
 def home():
     return "✅ Stock Price API (Supabase) is Running!"
