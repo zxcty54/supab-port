@@ -22,9 +22,9 @@ CORS(app)
 # ✅ Function to Fetch Stock Price
 def get_stock_price(stock):
     try:
-        stock = stock.lower()
-        if not stock.endswith(".ns"):
-            stock += ".ns"
+        stock = stock.upper()
+        if not stock.endswith(".NS"):
+            stock += ".NS"
 
         ticker = yf.Ticker(stock)
         history_data = ticker.history(period="2d")
@@ -85,7 +85,7 @@ def home():
 @app.route("/get_price/<stock>", methods=["GET"])
 def get_price(stock):
     try:
-        response = supabase.table("live_prices").select("*").eq("stock", stock.lower()).execute()
+        response = supabase.table("live_prices").select("*").eq("stock", stock.upper()).execute()
 
         if response.data:
             return jsonify(response.data[0])
