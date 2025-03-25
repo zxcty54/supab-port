@@ -6,19 +6,16 @@ from flask import Flask, jsonify
 from flask_cors import CORS
 from supabase import create_client, Client
 
-# ✅ Set Supabase Credentials Correctly
-SUPABASE_URL = "https://xejiiuswustskqkvnwsl.supabase.co"  # Your Supabase URL
-SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")  # Fetch from Environment Variable
+# ✅ Set Supabase Credentials
+SUPABASE_URL = os.getenv("SUPABASE_URL")  
+SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")  
 
-# ✅ Validate Supabase Keys
 if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
-    raise ValueError("🚨 SUPABASE_DOMAIN or SUPABASE_SERVICE_KEY is missing!")
+    raise ValueError("🚨 SUPABASE_URL or SUPABASE_SERVICE_KEY is missing!")
 
-# ✅ Initialize Supabase Client
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 print("✅ Connected to Supabase!")
 
-# ✅ Initialize Flask App
 app = Flask(__name__)
 CORS(app)
 
@@ -33,53 +30,54 @@ def get_stock_price(stock):
         history_data = ticker.history(period="2d")
 
         if history_data.empty:
-            return {"price": 0, "change": 0, "prevClose": 0}
+            return None
 
         live_price = round(history_data["Close"].iloc[-1], 2)
         prev_close = round(history_data["Close"].iloc[-2], 2) if len(history_data) > 1 else live_price
         change = round(((live_price - prev_close) / prev_close) * 100, 2) if prev_close else 0
 
-        return {"price": live_price, "change": change, "prevClose": prev_close}
+        return {"stock": stock, "price": live_price, "change": change, "prevClose": prev_close}
     
     except Exception as e:
-        return {"error": str(e)}
+        return None
 
 # ✅ Function to Update Stock Prices in Supabase
 def update_stock_prices():
     while True:
         try:
-            # ✅ Fetch Stocks from Supabase
-            response = supabase.table("live_prices").select("stock").execute()
-            if response.data is None:
-                print("❌ No stocks found in Supabase!")
-                time.sleep(180)
-                continue  # Skip iteration if no stocks are found
+            response = supabase.table("live_prices").select("stock", "price").execute()
+            existing_data = {row["stock"]: row["price"] for row in response.data} if response.data else {}
 
-            stocks = [row["stock"] for row in response.data]
+            # ✅ Fetch Stocks from Supabase
+            stocks = list(existing_data.keys())
+
+            if not stocks:
+                print("❌ No stocks found in Supabase!")
+                time.sleep(600)  # ✅ Sleep for 10 minutes before retrying
+                continue
 
             # ✅ Fetch Live Stock Prices
-            stock_data = {stock: get_stock_price(stock) for stock in stocks}
+            stock_updates = []
+            for stock in stocks:
+                data = get_stock_price(stock)
+                if data and data["price"] != existing_data.get(stock):  # ✅ Only update if price changes
+                    stock_updates.append(data)
 
-            # ✅ Update Stocks in Supabase
-            for stock, data in stock_data.items():
-                supabase.table("live_prices").upsert({
-                    "stock": stock, 
-                    "price": data["price"], 
-                    "change": data["change"], 
-                    "prevClose": data["prevClose"]
-                }).execute()
-
-            print("✅ Stock prices updated:", stock_data)
+            # ✅ Batch Update Stocks in Supabase
+            if stock_updates:
+                supabase.table("live_prices").upsert(stock_updates).execute()
+                print("✅ Stock prices updated:", stock_updates)
+            else:
+                print("✅ No price change, skipping update.")
 
         except Exception as e:
             print("❌ Error updating stock prices:", str(e))
 
-        time.sleep(180)  # ✅ Wait for 3 minutes before next update
+        time.sleep(600)  # ✅ Sleep for 10 minutes
 
 # ✅ Start Background Thread for Updating Stock Prices
 threading.Thread(target=update_stock_prices, daemon=True).start()
 
-# ✅ Flask Routes
 @app.route("/")
 def home():
     return "✅ Stock Price API (Supabase) is Running!"
@@ -87,8 +85,7 @@ def home():
 @app.route("/get_price/<stock>", methods=["GET"])
 def get_price(stock):
     try:
-        stock = stock.lower()
-        response = supabase.table("live_prices").select("*").eq("stock", stock).execute()
+        response = supabase.table("live_prices").select("*").eq("stock", stock.lower()).execute()
 
         if response.data:
             return jsonify(response.data[0])
