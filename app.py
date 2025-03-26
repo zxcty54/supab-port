@@ -39,6 +39,7 @@ def get_stock_price(stock):
         return {"stock": stock, "price": live_price, "change": change, "prevClose": prev_close}
     
     except Exception as e:
+        print(f"❌ Error fetching {stock} price: {str(e)}")
         return None
 
 # ✅ Function to Update Stock Prices in Supabase
@@ -47,21 +48,18 @@ def update_stock_prices():
         response = supabase.table("live_prices").select("stock", "price").execute()
         existing_data = {row["stock"]: row["price"] for row in response.data} if response.data else {}
 
-        # ✅ Fetch Stocks from Supabase
         stocks = list(existing_data.keys())
 
         if not stocks:
             print("❌ No stocks found in Supabase!")
             return {"message": "No stocks found in Supabase!"}
 
-        # ✅ Fetch Live Stock Prices
         stock_updates = []
         for stock in stocks:
             data = get_stock_price(stock)
-            if data and data["price"] != existing_data.get(stock):  # ✅ Only update if price changes
+            if data and data["price"] != existing_data.get(stock):
                 stock_updates.append(data)
 
-        # ✅ Batch Update Stocks in Supabase
         if stock_updates:
             supabase.table("live_prices").upsert(stock_updates).execute()
             print("✅ Stock prices updated:", stock_updates)
@@ -74,11 +72,11 @@ def update_stock_prices():
         print("❌ Error updating stock prices:", str(e))
         return {"error": str(e)}
 
-# ✅ Start Background Thread for Auto-Updating Stock Prices
+# ✅ Background Auto-Update (Runs Every 10 Minutes)
 def run_auto_update():
     while True:
         update_stock_prices()
-        time.sleep(600)  # ✅ Sleep for 10 minutes
+        time.sleep(600)
 
 threading.Thread(target=run_auto_update, daemon=True).start()
 
@@ -106,7 +104,7 @@ def get_prices():
         return jsonify({"error": str(e)}), 500
 
 # ✅ Manually Trigger Stock Price Update from Browser
-@app.route("/update_prices", methods=["POST"])
+@app.route("/update_prices", methods=["GET"])
 def manual_update():
     result = update_stock_prices()
     return jsonify(result)
