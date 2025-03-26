@@ -3,3 +3,5 @@ flask-cors
 yfinance
 supabase[admin]
 gunicorn
+aiohttp
+apscheduler
