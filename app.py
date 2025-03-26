@@ -40,6 +40,7 @@ async def get_stock_prices_async(stocks):
         return [result for result in results if result]
 
 async def update_stock_prices_async():
+    print("update_stock_prices_async started")
     try:
         response = supabase.table("live_prices").select("stock").execute()
         stocks = [row["stock"] for row in response.data] if response.data else []
@@ -57,17 +58,22 @@ async def update_stock_prices_async():
             time.sleep(2)
 
         if all_stock_updates:
+            print("Data before upsert:", all_stock_updates) #added print statement
             result = supabase.table("live_prices").upsert(all_stock_updates).execute()
-            print(f"✅ Supabase upsert result: {result}")
+            print("Supabase upsert result:", result) #added print statement
             print(f"✅ Updated {len(all_stock_updates)} stocks in Supabase!")
+            print("update_stock_prices_async finished successfully")
             return {"message": "Stock prices updated!", "updated_stocks": all_stock_updates}
         else:
             print("✅ No price change detected.")
+            print("update_stock_prices_async finished, no stock updates")
             return {"message": "No price change detected."}
 
     except Exception as e:
         print(f"❌ Error updating stock prices: {e}")
         return {"error": str(e)}
+
+    print("update_stock_prices_async finished")
 
 @app.route("/update_prices", methods=["GET", "POST"])
 async def handle_update_prices():
@@ -88,7 +94,9 @@ def get_price(stock):
     return jsonify(data.data[0])
 
 def scheduled_update():
+    print("Scheduled update started.")
     asyncio.run(update_stock_prices_async())
+    print("Scheduled update finished.")
 
 @app.route("/")
 def root():
