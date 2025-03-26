@@ -17,6 +17,32 @@ print("✅ Connected to Supabase!")
 app = Flask(__name__)
 CORS(app)
 
+def validate_stock_data(stock_data):
+    """Validates the stock data before upsert."""
+
+    if not isinstance(stock_data["stock"], str):
+        return False, "Invalid stock symbol type"
+
+    if not stock_data["stock"].isupper() or not stock_data["stock"].endswith(".NS"):
+        return False, "Invalid stock symbol format"
+
+    if not isinstance(stock_data["price"], (int, float)):
+        return False, "Invalid price type"
+
+    if pd.isna(stock_data["price"]) or pd.isna(stock_data["prevClose"]) or pd.isna(stock_data["change"]):
+        return False, "NaN values found"
+
+    if not isinstance(stock_data["prevClose"], (int, float)):
+        return False, "Invalid prevClose type"
+
+    if not isinstance(stock_data["change"], (int, float)):
+        return False, "Invalid change type"
+
+    if abs(stock_data["change"]) > 100: #example range check
+        return False, "Change percentage is outside of acceptable range"
+
+    return True, None
+
 async def fetch_stock_data(session, stock, max_retries=3, retry_delay=5):
     print(f"Fetching data for {stock}")
     retries = 0
@@ -25,11 +51,15 @@ async def fetch_stock_data(session, stock, max_retries=3, retry_delay=5):
             data = await asyncio.to_thread(yf.download, stock, period="2d")
             print(f"Yfinance data for {stock}: {data}")
             if data is not None and isinstance(data, pd.DataFrame) and not data.empty and len(data) >= 2:
-                prices = data["Close"]
-                live_price = round(prices.iloc[-1], 2)
-                prev_close = round(prices.iloc[-2], 2)
-                change = round(((live_price - prev_close) / prev_close) * 100, 2)
-                return {"stock": stock, "price": live_price, "change": change, "prevClose": prev_close}
+                if "Close" in data and "High" in data and "Low" in data and "Open" in data and "Volume" in data:
+                    prices = data["Close"]
+                    live_price = round(prices.iloc[-1], 2)
+                    prev_close = round(prices.iloc[-2], 2)
+                    change = round(((live_price - prev_close) / prev_close) * 100, 2)
+                    return {"stock": stock, "price": live_price, "change": change, "prevClose": prev_close}
+                else:
+                    print(f"❌ Missing columns in data for {stock}")
+                    return None
             else:
                 print(f"❌ Insufficient or empty data for {stock}, retry {retries + 1}")
                 retries += 1
@@ -41,13 +71,11 @@ async def fetch_stock_data(session, stock, max_retries=3, retry_delay=5):
     print(f"❌ Failed to fetch data for {stock} after {max_retries} retries")
     return None
 
-
 async def get_stock_prices_async(stocks):
     async with aiohttp.ClientSession() as session:
         tasks = [fetch_stock_data(session, stock) for stock in stocks]
         results = await asyncio.gather(*tasks)
         return [result for result in results if result]
-
 
 async def update_stock_prices_async():
     print("update_stock_prices_async started")
@@ -69,11 +97,15 @@ async def update_stock_prices_async():
 
         if all_stock_updates:
             for stock_update in all_stock_updates:
-                try:
-                    result = supabase.table("live_prices").upsert(stock_update).execute()
-                    print(f"Supabase upsert result for {stock_update['stock']}: {result}")
-                except Exception as e:
-                    print(f"❌ Error upserting {stock_update['stock']}: {e}")
+                is_valid, error_message = validate_stock_data(stock_update)
+                if is_valid:
+                    try:
+                        result = supabase.table("live_prices").upsert(stock_update).execute()
+                        print(f"Supabase upsert result for {stock_update['stock']}: {result}")
+                    except Exception as e:
+                        print(f"❌ Error upserting {stock_update['stock']}: {e}")
+                else:
+                    print(f"❌ Validation error for {stock_update['stock']}: {error_message}")
             print(f"✅ Attempted to update {len(all_stock_updates)} stocks in Supabase!")
             print("update_stock_prices_async finished successfully")
             return {"message": "Stock prices updated!", "updated_stocks": all_stock_updates}
@@ -88,7 +120,6 @@ async def update_stock_prices_async():
 
     print("update_stock_prices_async finished")
 
-
 @app.route("/update_prices", methods=["GET", "POST"])
 async def handle_update_prices():
     if request.method == "POST":
@@ -96,7 +127,6 @@ async def handle_update_prices():
         return jsonify(result)
     elif request.method == "GET":
         return jsonify({"message": "Use POST to update prices."}), 400
-
 
 @app.route("/get_price/<stock>")
 def get_price(stock):
@@ -108,11 +138,9 @@ def get_price(stock):
 
     return jsonify(data.data[0])
 
-
 @app.route("/")
 def root():
     return jsonify({"message": "API is running"}), 200
-
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
