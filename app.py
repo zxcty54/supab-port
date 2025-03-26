@@ -80,13 +80,17 @@ def manual_update():
     return jsonify(result)
 
 # ✅ Get All Prices from Supabase
-@app.route("/get_prices", methods=["GET"])
-def get_prices():
-    try:
-        response = supabase.table("live_prices").select("*").execute()
-        return jsonify(response.data)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+@app.route("/get_price/<stock>")
+def get_price(stock):
+    stock = stock.upper()  # Ensure consistency
+    query = f"SELECT * FROM live_prices WHERE stock = '{stock}'"
+    data = supabase.rpc("get_prices", query).execute()
+    
+    if not data or len(data.data) == 0:
+        return jsonify({"error": "Stock not found"}), 404
+    
+    return jsonify(data.data[0])
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
