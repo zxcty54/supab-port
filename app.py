@@ -43,40 +43,44 @@ def get_stock_price(stock):
 
 # ✅ Function to Update Stock Prices in Supabase
 def update_stock_prices():
+    try:
+        response = supabase.table("live_prices").select("stock", "price").execute()
+        existing_data = {row["stock"]: row["price"] for row in response.data} if response.data else {}
+
+        # ✅ Fetch Stocks from Supabase
+        stocks = list(existing_data.keys())
+
+        if not stocks:
+            print("❌ No stocks found in Supabase!")
+            return {"message": "No stocks found in Supabase!"}
+
+        # ✅ Fetch Live Stock Prices
+        stock_updates = []
+        for stock in stocks:
+            data = get_stock_price(stock)
+            if data and data["price"] != existing_data.get(stock):  # ✅ Only update if price changes
+                stock_updates.append(data)
+
+        # ✅ Batch Update Stocks in Supabase
+        if stock_updates:
+            supabase.table("live_prices").upsert(stock_updates).execute()
+            print("✅ Stock prices updated:", stock_updates)
+            return {"message": "Stock prices updated!", "updated_stocks": stock_updates}
+        else:
+            print("✅ No price change, skipping update.")
+            return {"message": "No price change, skipping update."}
+
+    except Exception as e:
+        print("❌ Error updating stock prices:", str(e))
+        return {"error": str(e)}
+
+# ✅ Start Background Thread for Auto-Updating Stock Prices
+def run_auto_update():
     while True:
-        try:
-            response = supabase.table("live_prices").select("stock", "price").execute()
-            existing_data = {row["stock"]: row["price"] for row in response.data} if response.data else {}
-
-            # ✅ Fetch Stocks from Supabase
-            stocks = list(existing_data.keys())
-
-            if not stocks:
-                print("❌ No stocks found in Supabase!")
-                time.sleep(600)  # ✅ Sleep for 10 minutes before retrying
-                continue
-
-            # ✅ Fetch Live Stock Prices
-            stock_updates = []
-            for stock in stocks:
-                data = get_stock_price(stock)
-                if data and data["price"] != existing_data.get(stock):  # ✅ Only update if price changes
-                    stock_updates.append(data)
-
-            # ✅ Batch Update Stocks in Supabase
-            if stock_updates:
-                supabase.table("live_prices").upsert(stock_updates).execute()
-                print("✅ Stock prices updated:", stock_updates)
-            else:
-                print("✅ No price change, skipping update.")
-
-        except Exception as e:
-            print("❌ Error updating stock prices:", str(e))
-
+        update_stock_prices()
         time.sleep(600)  # ✅ Sleep for 10 minutes
 
-# ✅ Start Background Thread for Updating Stock Prices
-threading.Thread(target=update_stock_prices, daemon=True).start()
+threading.Thread(target=run_auto_update, daemon=True).start()
 
 @app.route("/")
 def home():
@@ -86,12 +90,10 @@ def home():
 def get_price(stock):
     try:
         response = supabase.table("live_prices").select("*").eq("stock", stock.upper()).execute()
-
         if response.data:
             return jsonify(response.data[0])
         else:
             return jsonify({"error": "Stock not found"}), 404
-
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -100,9 +102,14 @@ def get_prices():
     try:
         response = supabase.table("live_prices").select("*").execute()
         return jsonify(response.data)
-    
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+# ✅ Manually Trigger Stock Price Update from Browser
+@app.route("/update_prices", methods=["POST"])
+def manual_update():
+    result = update_stock_prices()
+    return jsonify(result)
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
