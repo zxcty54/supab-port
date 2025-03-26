@@ -83,13 +83,14 @@ def manual_update():
 @app.route("/get_price/<stock>")
 def get_price(stock):
     stock = stock.upper()  # Ensure consistency
-    query = f"SELECT * FROM get_prices('{stock}')"
-    data = supabase.rpc(query).execute()
-    
+    # Correct the RPC call to pass the stock_symbol as an argument
+    data = supabase.rpc("get_prices", {"stock_symbol": stock}).execute()
+
     if not data or len(data.data) == 0:
         return jsonify({"error": "Stock not found"}), 404
     
     return jsonify(data.data[0])
+
 
 
 
