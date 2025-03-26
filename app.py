@@ -1,7 +1,7 @@
 import os
 import time
 import yfinance as yf
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from flask_cors import CORS
 from supabase import create_client, Client
 import asyncio
@@ -69,10 +69,13 @@ async def update_stock_prices_async():
         print(f"❌ Error updating stock prices: {e}")
         return {"error": str(e)}
 
-@app.route("/update_prices", methods=["POST"])
-async def manual_update():
-    result = await update_stock_prices_async()
-    return jsonify(result)
+@app.route("/update_prices", methods=["GET", "POST"])
+async def handle_update_prices():
+    if request.method == "POST":
+        result = await update_stock_prices_async()
+        return jsonify(result)
+    elif request.method == "GET":
+        return jsonify({"message": "Use POST to update prices."}), 400
 
 @app.route("/get_price/<stock>")
 def get_price(stock):
@@ -86,6 +89,10 @@ def get_price(stock):
 
 def scheduled_update():
     asyncio.run(update_stock_prices_async())
+
+@app.route("/")
+def root():
+    return jsonify({"message": "API is running"}), 200
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
