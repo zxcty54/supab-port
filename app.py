@@ -6,7 +6,6 @@ from flask_cors import CORS
 from supabase import create_client, Client
 import asyncio
 import aiohttp
-from apscheduler.schedulers.background import BackgroundScheduler
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
@@ -58,9 +57,9 @@ async def update_stock_prices_async():
             time.sleep(2)
 
         if all_stock_updates:
-            print("Data before upsert:", all_stock_updates) #added print statement
+            print("Data before upsert:", all_stock_updates)
             result = supabase.table("live_prices").upsert(all_stock_updates).execute()
-            print("Supabase upsert result:", result) #added print statement
+            print("Supabase upsert result:", result)
             print(f"✅ Updated {len(all_stock_updates)} stocks in Supabase!")
             print("update_stock_prices_async finished successfully")
             return {"message": "Stock prices updated!", "updated_stocks": all_stock_updates}
@@ -93,20 +92,10 @@ def get_price(stock):
     
     return jsonify(data.data[0])
 
-def scheduled_update():
-    print("Scheduled update started.")
-    asyncio.run(update_stock_prices_async())
-    print("Scheduled update finished.")
-
 @app.route("/")
 def root():
     return jsonify({"message": "API is running"}), 200
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-
-    scheduler = BackgroundScheduler()
-    scheduler.add_job(func=scheduled_update, trigger="interval", minutes=1)
-    scheduler.start()
-
     app.run(host="0.0.0.0", port=port)
