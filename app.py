@@ -6,6 +6,7 @@ from flask_cors import CORS
 from supabase import create_client, Client
 import asyncio
 import aiohttp
+import pandas as pd  # Import pandas
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
@@ -17,16 +18,18 @@ app = Flask(__name__)
 CORS(app)
 
 async def fetch_stock_data(session, stock):
+    print(f"Fetching data for {stock}")
     try:
         data = await asyncio.to_thread(yf.download, stock, period="2d", group_by="ticker")
-        if stock in data and len(data[stock]["Close"]) >= 2:
+        print(f"Yfinance data for {stock}: {data}") #added log
+        if data is not None and isinstance(data, pd.DataFrame) and not data.empty and stock in data and len(data[stock]["Close"]) >= 2:
             prices = data[stock]["Close"]
             live_price = round(prices.iloc[-1], 2)
             prev_close = round(prices.iloc[-2], 2)
             change = round(((live_price - prev_close) / prev_close) * 100, 2)
             return {"stock": stock, "price": live_price, "change": change, "prevClose": prev_close}
         else:
-            print(f"❌ Insufficient data for {stock}")
+            print(f"❌ Insufficient or empty data for {stock}")
             return None
     except Exception as e:
         print(f"❌ Error fetching {stock}: {e}")
@@ -57,9 +60,9 @@ async def update_stock_prices_async():
             time.sleep(2)
 
         if all_stock_updates:
-            print("Data before upsert:", all_stock_updates)
+            print("Data before upsert:", all_stock_updates) #added print statement
             result = supabase.table("live_prices").upsert(all_stock_updates).execute()
-            print("Supabase upsert result:", result)
+            print("Supabase upsert result:", result) #added print statement
             print(f"✅ Updated {len(all_stock_updates)} stocks in Supabase!")
             print("update_stock_prices_async finished successfully")
             return {"message": "Stock prices updated!", "updated_stocks": all_stock_updates}
