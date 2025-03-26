@@ -2,7 +2,7 @@ import os
 import threading
 import time
 import yfinance as yf
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from flask_cors import CORS
 from supabase import create_client, Client
 
@@ -19,71 +19,79 @@ print("✅ Connected to Supabase!")
 app = Flask(__name__)
 CORS(app)
 
-# ✅ Function to Fetch Stock Price
-def get_stock_price(stock):
+# ✅ Fetch Multiple Stock Prices in One API Call
+def get_stock_prices(stocks):
     try:
-        stock = stock.upper()
-        if not stock.endswith(".NS"):
-            stock += ".NS"
+        tickers = [s.upper() if s.endswith(".NS") else s.upper() + ".NS" for s in stocks]
+        data = yf.download(tickers, period="2d", group_by="ticker", threads=True)
 
-        ticker = yf.Ticker(stock)
-        history_data = ticker.history(period="2d")
+        stock_prices = []
+        for stock in tickers:
+            if stock in data:
+                prices = data[stock]["Close"]
+                if len(prices) >= 2:
+                    live_price = round(prices.iloc[-1], 2)
+                    prev_close = round(prices.iloc[-2], 2)
+                    change = round(((live_price - prev_close) / prev_close) * 100, 2)
+                    stock_prices.append({"stock": stock, "price": live_price, "change": change, "prevClose": prev_close})
 
-        if history_data.empty:
-            return None
-
-        live_price = round(history_data["Close"].iloc[-1], 2)
-        prev_close = round(history_data["Close"].iloc[-2], 2) if len(history_data) > 1 else live_price
-        change = round(((live_price - prev_close) / prev_close) * 100, 2) if prev_close else 0
-
-        return {"stock": stock, "price": live_price, "change": change, "prevClose": prev_close}
-    
+        return stock_prices
     except Exception as e:
-        print(f"❌ Error fetching {stock} price: {str(e)}")
-        return None
+        print("❌ Error fetching stock prices:", str(e))
+        return []
 
-# ✅ Function to Update Stock Prices in Supabase
+# ✅ Update Supabase in Batches
 def update_stock_prices():
     try:
-        response = supabase.table("live_prices").select("stock", "price").execute()
-        existing_data = {row["stock"]: row["price"] for row in response.data} if response.data else {}
-
-        stocks = list(existing_data.keys())
+        # ✅ Fetch Stocks from Supabase
+        response = supabase.table("live_prices").select("stock").execute()
+        stocks = [row["stock"] for row in response.data] if response.data else []
 
         if not stocks:
             print("❌ No stocks found in Supabase!")
             return {"message": "No stocks found in Supabase!"}
 
-        stock_updates = []
-        for stock in stocks:
-            data = get_stock_price(stock)
-            if data and data["price"] != existing_data.get(stock):
-                stock_updates.append(data)
+        # ✅ Fetch stock prices in batches of 100 (to avoid rate limits)
+        all_stock_updates = []
+        batch_size = 100
+        for i in range(0, len(stocks), batch_size):
+            batch_stocks = stocks[i:i + batch_size]
+            stock_updates = get_stock_prices(batch_stocks)
+            all_stock_updates.extend(stock_updates)
+            time.sleep(2)  # ✅ Avoid rate limits
 
-        if stock_updates:
-            supabase.table("live_prices").upsert(stock_updates).execute()
-            print("✅ Stock prices updated:", stock_updates)
-            return {"message": "Stock prices updated!", "updated_stocks": stock_updates}
+        # ✅ Batch Update in Supabase
+        if all_stock_updates:
+            supabase.table("live_prices").upsert(all_stock_updates).execute()
+            print(f"✅ Updated {len(all_stock_updates)} stocks in Supabase!")
+            return {"message": "Stock prices updated!", "updated_stocks": all_stock_updates}
         else:
-            print("✅ No price change, skipping update.")
-            return {"message": "No price change, skipping update."}
+            print("✅ No price change detected.")
+            return {"message": "No price change detected."}
 
     except Exception as e:
         print("❌ Error updating stock prices:", str(e))
         return {"error": str(e)}
 
-# ✅ Background Auto-Update (Runs Every 10 Minutes)
+# ✅ Manual Update API Route (For Browser)
+@app.route("/update_prices", methods=["POST"])
+def manual_update():
+    result = update_stock_prices()
+    return jsonify(result)
+
+# ✅ Background Auto Update (Every 15 Minutes)
 def run_auto_update():
     while True:
         update_stock_prices()
-        time.sleep(600)
+        time.sleep(900)  # ✅ Sleep for 15 minutes
 
 threading.Thread(target=run_auto_update, daemon=True).start()
 
 @app.route("/")
 def home():
-    return "✅ Stock Price API (Supabase) is Running!"
+    return "✅ Stock Price API is Running!"
 
+# ✅ Get Single Stock Price from Supabase
 @app.route("/get_price/<stock>", methods=["GET"])
 def get_price(stock):
     try:
@@ -95,6 +103,7 @@ def get_price(stock):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# ✅ Get All Stock Prices from Supabase
 @app.route("/get_prices", methods=["GET"])
 def get_prices():
     try:
@@ -102,12 +111,6 @@ def get_prices():
         return jsonify(response.data)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-# ✅ Manually Trigger Stock Price Update from Browser
-@app.route("/update_prices", methods=["GET"])
-def manual_update():
-    result = update_stock_prices()
-    return jsonify(result)
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
