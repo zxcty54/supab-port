@@ -1,158 +1,88 @@
-import os
-import asyncio
-import time
-import yfinance as yf
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify
 from flask_cors import CORS
-from supabase import create_client, Client
-import aiohttp
-import pandas as pd
+import supabase_py
+import yfinance as yf
+import os
+from datetime import datetime
+
+# Supabase configuration
+SUPABASE_URL = "YOUR_SUPABASE_URL"
+SUPABASE_KEY = "YOUR_SUPABASE_API_KEY"
 
 # Initialize Supabase client
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
+supabase = supabase_py.create_client(SUPABASE_URL, SUPABASE_KEY)
 
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
-print("✅ Connected to Supabase!")
-
-# Initialize Flask application
+# Initialize Flask app
 app = Flask(__name__)
+
+# Enable CORS
 CORS(app)
 
-# Function to validate stock data before upserting
-def validate_stock_data(stock_data):
-    """Validates the stock data before upsert."""
-    if not isinstance(stock_data["stock"], str):
-        return False, "Invalid stock symbol type"
-    
-    if not stock_data["stock"].isupper() or not stock_data["stock"].endswith(".NS"):
-        return False, "Invalid stock symbol format"
-    
-    if not isinstance(stock_data["price"], (int, float)):
-        return False, "Invalid price type"
-    
-    if pd.isna(stock_data["price"]) or pd.isna(stock_data["prevClose"]) or pd.isna(stock_data["change"]):
-        return False, "NaN values found"
-    
-    if not isinstance(stock_data["prevClose"], (int, float)):
-        return False, "Invalid prevClose type"
-    
-    if not isinstance(stock_data["change"], (int, float)):
-        return False, "Invalid change type"
-    
-    if abs(stock_data["change"]) > 100:  # Example range check
-        return False, "Change percentage is outside of acceptable range"
-    
-    return True, None
-
-# Async function to fetch stock data from YFinance
-async def fetch_stock_data(session, stock, max_retries=3, retry_delay=5):
-    print(f"🔄 Fetching data for {stock}")
-    retries = 0
-    while retries < max_retries:
-        try:
-            data = await asyncio.to_thread(yf.download, stock, period="2d")
-            print(f"📊 YFinance data for {stock}: {data}")
-            if data is not None and isinstance(data, pd.DataFrame) and not data.empty and len(data) >= 2:
-                if "Close" in data and "High" in data and "Low" in data and "Open" in data and "Volume" in data:
-                    prices = data["Close"]
-                    live_price = round(prices.iloc[-1], 2)
-                    prev_close = round(prices.iloc[-2], 2)
-                    change = round(((live_price - prev_close) / prev_close) * 100, 2)
-                    return {"stock": stock, "price": live_price, "change": change, "prevClose": prev_close}
-                else:
-                    print(f"❌ Missing columns in data for {stock}")
-                    return None
-            else:
-                print(f"❌ Insufficient or empty data for {stock}, retry {retries + 1}")
-                retries += 1
-                await asyncio.sleep(retry_delay)
-        except Exception as e:
-            print(f"❌ Error fetching {stock}: {e}, retry {retries + 1}")
-            retries += 1
-            await asyncio.sleep(retry_delay)
-    print(f"❌ Failed to fetch data for {stock} after {max_retries} retries")
-    return None
-
-# Function to gather stock prices asynchronously
-async def get_stock_prices_async(stocks):
-    async with aiohttp.ClientSession() as session:
-        tasks = [fetch_stock_data(session, stock) for stock in stocks]
-        results = await asyncio.gather(*tasks)
-        return [result for result in results if result]
-
-# Function to update stock prices in Supabase
-async def update_stock_prices_async():
-    print("🔄 update_stock_prices_async started")
+# Function to fetch stock data from YFinance
+def fetch_stock_data(stock):
     try:
-        # Fetch list of stocks from Supabase
-        response = supabase.table("live_prices").select("stock").execute()
-        stocks = [row["stock"] for row in response.data] if response.data else []
-
-        if not stocks:
-            print("❌ No stocks found in Supabase!")
-            return {"message": "No stocks found in Supabase!"}
-
-        all_stock_updates = []
-        batch_size = 100  # Batch size to limit the number of concurrent requests
-        for i in range(0, len(stocks), batch_size):
-            batch_stocks = stocks[i:i + batch_size]
-            stock_updates = await get_stock_prices_async(batch_stocks)
-            all_stock_updates.extend(stock_updates)
-            await asyncio.sleep(2)  # Sleep asynchronously to avoid blocking
-
-        # Upsert stock data into Supabase
-        if all_stock_updates:
-            for stock_update in all_stock_updates:
-                is_valid, error_message = validate_stock_data(stock_update)
-                if is_valid:
-                    try:
-                        print(f"⬆️ Upserting {stock_update} into Supabase...")
-                        result = supabase.table("live_prices").upsert(stock_update).execute()
-                        print(f"✅ Supabase upsert success for {stock_update['stock']}: {result}")
-                    except Exception as e:
-                        print(f"❌ Error upserting {stock_update['stock']}: {e}")
-                else:
-                    print(f"❌ Validation error for {stock_update['stock']}: {error_message}")
-
-            print(f"✅ Attempted to update {len(all_stock_updates)} stocks in Supabase!")
-            return {"message": "Stock prices updated!", "updated_stocks": all_stock_updates}
-        else:
-            print("✅ No price change detected.")
-            return {"message": "No price change detected."}
-
+        # Fetch stock data from YFinance
+        stock_data = yf.Ticker(stock).history(period="1d")
+        latest_data = stock_data.iloc[-1]
+        
+        # Calculate price change
+        change = latest_data['Close'] - latest_data['Open']
+        
+        return {
+            'price': latest_data['Close'],
+            'prevClose': latest_data['Close'],  # This can be adjusted to your needs
+            'change': change
+        }
     except Exception as e:
-        print(f"❌ Error updating stock prices: {e}")
-        return {"error": str(e)}
+        print(f"Error fetching data for {stock}: {e}")
+        return None
+
+# Function to fetch the list of stocks from Supabase
+def get_stocks_from_supabase():
+    response = supabase.from_("live_prices").select("stock").execute()
     
-    print("✅ update_stock_prices_async finished")
+    if response.get("error"):
+        print(f"Error fetching stocks from Supabase: {response['error']}")
+        return []
+    
+    stock_list = [stock['stock'] for stock in response['data']]
+    return stock_list
 
-# Route to update stock prices
-@app.route("/update_prices", methods=["GET", "POST"])
-async def handle_update_prices():
-    if request.method == "POST":
-        result = await update_stock_prices_async()
-        return jsonify(result)
-    elif request.method == "GET":
-        return jsonify({"message": "Use POST to update prices."}), 400
+# Function to update live prices in Supabase
+def update_live_prices(stock, data):
+    try:
+        response = supabase.from_("live_prices").upsert({
+            "stock": stock,
+            "price": data['price'],
+            "prevClose": data['prevClose'],
+            "change": data['change'],
+            "created_at": datetime.now().isoformat()  # Set the timestamp
+        }).execute()
+        
+        if response.get("error"):
+            print(f"Error updating {stock}: {response['error']}")
+        else:
+            print(f"Updated {stock} successfully")
+    except Exception as e:
+        print(f"Error updating {stock}: {e}")
 
-# Route to get price of a specific stock
-@app.route("/get_price/<stock>")
-def get_price(stock):
-    stock = stock.upper()
-    data = supabase.table("live_prices").select("*").eq("stock", stock).execute()
+# Route to fetch and update stock data
+@app.route('/update_stock_prices', methods=['GET'])
+def update_stock_prices():
+    stock_list = get_stocks_from_supabase()
+    
+    if not stock_list:
+        return jsonify({"error": "No stocks found in the database"}), 400
+    
+    # Fetch and update data for each stock
+    for stock in stock_list:
+        data = fetch_stock_data(stock)
+        
+        if data:
+            update_live_prices(stock, data)
+    
+    return jsonify({"message": "Stock prices updated successfully!"})
 
-    if not data or len(data.data) == 0:
-        return jsonify({"error": "Stock not found"}), 404
-
-    return jsonify(data.data[0])
-
-# Health check route
-@app.route("/")
-def root():
-    return jsonify({"message": "API is running"}), 200
-
-# Main entry point for Flask app
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+# Run the Flask app
+if __name__ == '__main__':
+    app.run(debug=True, host='0.0.0.0', port=5000)
