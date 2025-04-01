@@ -1,6 +1,6 @@
 from flask import Flask, jsonify
 from flask_cors import CORS
-import supabase_py
+from supabase import create_client
 import yfinance as yf
 import os
 from datetime import datetime
@@ -10,7 +10,8 @@ SUPABASE_URL = "YOUR_SUPABASE_URL"
 SUPABASE_KEY = "YOUR_SUPABASE_API_KEY"
 
 # Initialize Supabase client
-supabase = supabase_py.create_client(SUPABASE_URL, SUPABASE_KEY)
+supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+
 
 # Initialize Flask app
 app = Flask(__name__)
