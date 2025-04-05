@@ -3,6 +3,5 @@ flask-cors
 yfinance
 supabase
 gunicorn
-aiohttp
-apscheduler
 pandas
+python-dotenv
