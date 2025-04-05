@@ -1,33 +1,38 @@
 from flask import Flask, jsonify
-from supabase import create_client
+from flask_cors import CORS
 from datetime import datetime
 import yfinance as yf
+from supabase import create_client
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 app = Flask(__name__)
+CORS(app)
 
-# Load credentials
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-
-supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-
-@app.route("/")
-def home():
-    return "Index Price Updater Running"
+supabase_url = os.getenv("SUPABASE_URL")
+supabase_key = os.getenv("SUPABASE_KEY")  # Use service role key for write access
+supabase = create_client(supabase_url, supabase_key)
 
 @app.route("/update-prices", methods=["GET"])
 def update_prices():
     try:
-        # ✅ Get list of tickers from Supabase
-        response = supabase.table("live_prices").select("ticker, stock").execute()
+        # ✅ fetch from 'stock' column, which is the primary key
+        response = supabase.table("live_prices").select("stock").execute()
         tickers = response.data
 
         updated = []
 
         for item in tickers:
-            ticker_code = item["ticker"]
-            name = item["stock"]
+            raw_ticker = item["stock"]  # use correct column
+            name = raw_ticker
+
+            # ✅ auto-append .NS for Indian stocks (skip if index like ^NSEI or already ends with .NS)
+            if not raw_ticker.startswith("^") and not raw_ticker.endswith(".NS"):
+                ticker_code = raw_ticker + ".NS"
+            else:
+                ticker_code = raw_ticker
 
             try:
                 ticker = yf.Ticker(ticker_code)
@@ -39,30 +44,29 @@ def update_prices():
                     prev_close = float(latest['Open'])
                     change = price - prev_close
 
-                    # ✅ Update Supabase
+                    # ✅ upsert using stock symbol
                     supabase.table("live_prices").upsert({
-                        "ticker": ticker_code,
-                        "stock": name,
+                        "stock": raw_ticker,
                         "price": price,
                         "prevClose": prev_close,
                         "change": change,
                         "created_at": datetime.utcnow().isoformat()
-                    }, on_conflict=["ticker"]).execute()
+                    }, on_conflict=["stock"]).execute()
 
                     updated.append({
-                        "ticker": ticker_code,
-                        "stock": name,
+                        "stock": raw_ticker,
                         "price": price,
                         "prevClose": prev_close,
                         "change": change
                     })
 
             except Exception as e:
-                print(f"Error for {ticker_code}: {e}")
+                print(f"Error fetching {ticker_code}: {e}")
 
-        return jsonify({"message": "Prices updated", "data": updated})
+        return jsonify({"updated": updated}), 200
 
     except Exception as e:
+        print(f"Error updating prices: {e}")
         return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
