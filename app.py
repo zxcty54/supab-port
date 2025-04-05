@@ -11,11 +11,12 @@ load_dotenv()
 app = Flask(__name__)
 CORS(app)
 
+# Supabase credentials
 supabase_url = os.getenv("SUPABASE_URL")
 supabase_key = os.getenv("SUPABASE_KEY")
 supabase = create_client(supabase_url, supabase_key)
 
-# ✅ Recognized indices (don’t append .NS)
+# Known index symbols (don’t append .NS)
 INDEX_SYMBOLS = {"NSEI", "NSEBANK", "BSESN", "DJI", "IXIC", "GSPC"}
 
 @app.route("/update-prices", methods=["GET"])
@@ -28,8 +29,8 @@ def update_prices():
         for item in tickers:
             raw_symbol = item["stock"].strip().upper()
 
-            # Index or stock check
-            if raw_symbol in INDEX_SYMBOLS:
+            # Add .NS only for Indian stocks
+            if raw_symbol in INDEX_SYMBOLS or raw_symbol.startswith("^"):
                 ticker_code = raw_symbol
             else:
                 ticker_code = raw_symbol + ".NS"
@@ -37,18 +38,18 @@ def update_prices():
             try:
                 ticker = yf.Ticker(ticker_code)
 
-                # 🟢 Index Logic
-                if raw_symbol in INDEX_SYMBOLS:
+                # ✅ Index logic
+                if raw_symbol in INDEX_SYMBOLS or raw_symbol.startswith("^"):
                     fast = ticker.fast_info
                     price = fast.get("lastPrice")
                     prev_close = fast.get("previousClose")
 
-                    if price is None or prev_close is None:
+                    if price is None or prev_close is None or prev_close == 0:
                         raise Exception("Index data not available")
 
-                   change = ((price - prev_close) / prev_close) * 100
+                    change = ((price - prev_close) / prev_close) * 100
 
-                # 🔵 Stock Logic
+                # ✅ Stock logic
                 else:
                     hist = ticker.history(period="1d")
                     if hist.empty:
@@ -57,14 +58,18 @@ def update_prices():
                     latest = hist.iloc[-1]
                     price = float(latest["Close"])
                     prev_close = float(latest["Open"])
-                    change = price - prev_close
 
-                # Update to Supabase
+                    if prev_close == 0:
+                        raise Exception("Previous close is zero")
+
+                    change = ((price - prev_close) / prev_close) * 100
+
+                # ✅ Insert/Update Supabase
                 supabase.table("live_prices").upsert({
                     "stock": raw_symbol,
                     "price": price,
                     "prevClose": prev_close,
-                    "change": change,
+                    "change": round(change, 2),  # percentage
                     "created_at": datetime.utcnow().isoformat()
                 }, on_conflict=["stock"]).execute()
 
@@ -72,7 +77,7 @@ def update_prices():
                     "stock": raw_symbol,
                     "price": price,
                     "prevClose": prev_close,
-                    "change": change
+                    "change": round(change, 2)
                 })
 
             except Exception as e:
