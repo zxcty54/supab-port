@@ -1,6 +1,6 @@
 from flask import Flask, jsonify
 from flask_cors import CORS
-from datetime import datetime
+from datetime import datetime, timedelta
 from supabase import create_client
 from dotenv import load_dotenv
 import threading
@@ -18,8 +18,17 @@ INDEX_SYMBOLS = {"NSEI", "NSEBANK", "BSESN", "DJI", "IXIC", "GSPC"}
 BATCH_SIZE = 40
 DELAY_BETWEEN_BATCH = 15  # seconds
 
+last_updated_time = datetime.min  # 🕒 Global time tracker
+
 
 def update_in_batches():
+    global last_updated_time
+
+    now = datetime.utcnow()
+    if now - last_updated_time < timedelta(hours=1):
+        print("⏳ Skipping: Last update was less than 1 hour ago.")
+        return
+
     print("📦 Batch update started...")
     try:
         response = supabase.table("live_prices").select("stock").execute()
@@ -63,6 +72,7 @@ def update_in_batches():
             print("⏳ Sleeping for", DELAY_BETWEEN_BATCH, "seconds...")
             time.sleep(DELAY_BETWEEN_BATCH)
 
+        last_updated_time = datetime.utcnow()  # ✅ Update the timestamp
         print("🎉 All batches updated.")
 
     except Exception as e:
