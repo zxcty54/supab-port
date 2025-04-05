@@ -15,6 +15,9 @@ supabase_url = os.getenv("SUPABASE_URL")
 supabase_key = os.getenv("SUPABASE_KEY")
 supabase = create_client(supabase_url, supabase_key)
 
+# ✅ Recognized indices (don’t append .NS)
+INDEX_SYMBOLS = {"NSEI", "NSEBANK", "BSESN", "DJI", "IXIC", "GSPC"}
+
 @app.route("/update-prices", methods=["GET"])
 def update_prices():
     try:
@@ -25,8 +28,8 @@ def update_prices():
         for item in tickers:
             raw_symbol = item["stock"].strip().upper()
 
-            # 🧠 Append .NS only for Indian stocks (not for indices)
-            if raw_symbol in ["NSEI", "NSEBANK", "BSESN", "DJI", "IXIC", "GSPC"]:
+            # Index or stock check
+            if raw_symbol in INDEX_SYMBOLS:
                 ticker_code = raw_symbol
             else:
                 ticker_code = raw_symbol + ".NS"
@@ -34,26 +37,29 @@ def update_prices():
             try:
                 ticker = yf.Ticker(ticker_code)
 
-                # If index, use fast_info or info
-                if raw_symbol in ["NSEI", "NSEBANK", "BSESN", "DJI", "IXIC", "GSPC"]:
-                    price = ticker.fast_info.get("lastPrice") or ticker.info.get("regularMarketPrice")
-                    prev_close = ticker.fast_info.get("previousClose") or ticker.info.get("previousClose")
+                # 🟢 Index Logic
+                if raw_symbol in INDEX_SYMBOLS:
+                    fast = ticker.fast_info
+                    price = fast.get("lastPrice")
+                    prev_close = fast.get("previousClose")
 
                     if price is None or prev_close is None:
                         raise Exception("Index data not available")
 
                     change = price - prev_close
 
+                # 🔵 Stock Logic
                 else:
-                    data = ticker.history(period="1d")
-                    if data.empty:
+                    hist = ticker.history(period="1d")
+                    if hist.empty:
                         raise Exception("Stock data not available")
 
-                    latest = data.iloc[-1]
+                    latest = hist.iloc[-1]
                     price = float(latest["Close"])
                     prev_close = float(latest["Open"])
                     change = price - prev_close
 
+                # Update to Supabase
                 supabase.table("live_prices").upsert({
                     "stock": raw_symbol,
                     "price": price,
@@ -70,12 +76,12 @@ def update_prices():
                 })
 
             except Exception as e:
-                print(f"Error fetching {ticker_code}: {e}")
+                print(f"❌ Error fetching {raw_symbol}: {e}")
 
         return jsonify({"updated": updated}), 200
 
     except Exception as e:
-        print(f"Main error: {e}")
+        print(f"🔥 Main error: {e}")
         return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
