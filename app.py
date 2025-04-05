@@ -1,36 +1,41 @@
 from flask import Flask, jsonify
 from flask_cors import CORS
 from datetime import datetime
+from supabase import create_client
+from dotenv import load_dotenv
+import threading
 import yfinance as yf
 import os
-from dotenv import load_dotenv
-from supabase import create_client
 import time
 
 load_dotenv()
-
 app = Flask(__name__)
 CORS(app)
 
 supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
 INDEX_SYMBOLS = {"NSEI", "NSEBANK", "BSESN", "DJI", "IXIC", "GSPC"}
 
-@app.route('/update-prices', methods=['GET'])
-def update_prices():
-    try:
-        tickers_data = supabase.table("live_prices").select("stock").execute().data
-        all_updated = []
+BATCH_SIZE = 40
+DELAY_BETWEEN_BATCH = 15  # seconds
 
-        # Batch of 20 tickers at a time
-        for i in range(0, len(tickers_data), 20):
-            batch = tickers_data[i:i + 20]
-            print(f"⏳ Processing batch {i // 20 + 1}...")
+
+def update_in_batches():
+    print("📦 Batch update started...")
+    try:
+        response = supabase.table("live_prices").select("stock").execute()
+        all_stocks = response.data
+        total = len(all_stocks)
+        print(f"🔢 Total stocks: {total}")
+
+        for start in range(0, total, BATCH_SIZE):
+            batch = all_stocks[start:start + BATCH_SIZE]
+            print(f"🚀 Updating batch: {start} to {start + BATCH_SIZE}")
 
             for item in batch:
-                raw_symbol = item['stock'].strip().upper()
-                symbol = raw_symbol if raw_symbol in INDEX_SYMBOLS else raw_symbol + ".NS"
-
                 try:
+                    raw_symbol = item["stock"].strip().upper()
+                    symbol = raw_symbol if raw_symbol in INDEX_SYMBOLS else raw_symbol + ".NS"
+
                     ticker = yf.Ticker(symbol)
                     fast = ticker.fast_info
 
@@ -50,24 +55,25 @@ def update_prices():
                         "created_at": datetime.utcnow().isoformat()
                     }, on_conflict=["stock"]).execute()
 
-                    all_updated.append({
-                        "stock": raw_symbol,
-                        "price": price,
-                        "prevClose": prev_close,
-                        "change": change
-                    })
+                    print(f"✅ Updated: {raw_symbol} - ₹{price} ({change}%)")
 
                 except Exception as e:
-                    print(f"❌ {raw_symbol} error: {e}")
+                    print(f"❌ Error {raw_symbol}: {e}")
 
-            # Wait between batches to avoid overload
-            time.sleep(15)
+            print("⏳ Sleeping for", DELAY_BETWEEN_BATCH, "seconds...")
+            time.sleep(DELAY_BETWEEN_BATCH)
 
-        return jsonify({"updated": all_updated}), 200
+        print("🎉 All batches updated.")
 
     except Exception as e:
-        print("🔥 Error:", e)
-        return jsonify({"error": str(e)}), 500
+        print("🔥 Error in batch updater:", e)
+
+
+@app.route("/update-prices", methods=["GET"])
+def update_prices():
+    threading.Thread(target=update_in_batches).start()
+    return jsonify({"message": "Batch update started"}), 200
+
 
 if __name__ == "__main__":
     app.run()
