@@ -11,39 +11,45 @@ load_dotenv()
 app = Flask(__name__)
 CORS(app)
 
+# Supabase setup
 supabase_url = os.getenv("SUPABASE_URL")
-supabase_key = os.getenv("SUPABASE_KEY")
+supabase_key = os.getenv("SUPABASE_KEY")  # Use service role key
 supabase = create_client(supabase_url, supabase_key)
+
+# List of index symbols (these won't get .NS)
+INDEX_LIST = ["NSEI", "BSESN", "NSEBANK", "DJI", "IXIC", "GSPC", "^NSEI", "^BSESN"]
 
 @app.route("/update-prices", methods=["GET"])
 def update_prices():
     try:
+        # 🔄 Get all stock/index symbols from Supabase
         response = supabase.table("live_prices").select("stock").execute()
         tickers = response.data
+
         updated = []
 
         for item in tickers:
-            raw_ticker = item["stock"]
+            raw_symbol = item["stock"].strip().upper()  # Clean symbol
 
-            # Add .NS only for Indian stocks
-            if not raw_ticker.startswith("^") and not raw_ticker.endswith(".NS"):
-                ticker_code = raw_ticker + ".NS"
+            # 🧠 Add .NS only for Indian stocks (not indices)
+            if raw_symbol in INDEX_LIST or raw_symbol.startswith("^"):
+                ticker_code = raw_symbol
             else:
-                ticker_code = raw_ticker
+                ticker_code = raw_symbol + ".NS"
 
             try:
                 ticker = yf.Ticker(ticker_code)
-                info = ticker.info
+                data = ticker.history(period="1d")
 
-                price = info.get("regularMarketPrice")
-                prev_close = info.get("previousClose")
+                if not data.empty:
+                    latest = data.iloc[-1]
+                    price = float(latest["Close"])
+                    prev_close = float(latest["Open"])
+                    change = price - prev_close
 
-                if price is not None and prev_close is not None:
-                    change = round(price - prev_close, 2)
-
-                    # Upsert price
+                    # 🔄 Update price in Supabase using stock symbol
                     supabase.table("live_prices").upsert({
-                        "stock": raw_ticker,
+                        "stock": raw_symbol,
                         "price": price,
                         "prevClose": prev_close,
                         "change": change,
@@ -51,7 +57,7 @@ def update_prices():
                     }, on_conflict=["stock"]).execute()
 
                     updated.append({
-                        "stock": raw_ticker,
+                        "stock": raw_symbol,
                         "price": price,
                         "prevClose": prev_close,
                         "change": change
