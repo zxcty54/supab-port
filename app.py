@@ -12,23 +12,20 @@ app = Flask(__name__)
 CORS(app)
 
 supabase_url = os.getenv("SUPABASE_URL")
-supabase_key = os.getenv("SUPABASE_KEY")  # Use service role key for write access
+supabase_key = os.getenv("SUPABASE_KEY")
 supabase = create_client(supabase_url, supabase_key)
 
 @app.route("/update-prices", methods=["GET"])
 def update_prices():
     try:
-        # ✅ fetch from 'stock' column, which is the primary key
         response = supabase.table("live_prices").select("stock").execute()
         tickers = response.data
-
         updated = []
 
         for item in tickers:
-            raw_ticker = item["stock"]  # use correct column
-            name = raw_ticker
+            raw_ticker = item["stock"]
 
-            # ✅ auto-append .NS for Indian stocks (skip if index like ^NSEI or already ends with .NS)
+            # Add .NS only for Indian stocks
             if not raw_ticker.startswith("^") and not raw_ticker.endswith(".NS"):
                 ticker_code = raw_ticker + ".NS"
             else:
@@ -36,15 +33,15 @@ def update_prices():
 
             try:
                 ticker = yf.Ticker(ticker_code)
-                data = ticker.history(period="1d")
+                info = ticker.info
 
-                if not data.empty:
-                    latest = data.iloc[-1]
-                    price = float(latest['Close'])
-                    prev_close = float(latest['Open'])
-                    change = price - prev_close
+                price = info.get("regularMarketPrice")
+                prev_close = info.get("previousClose")
 
-                    # ✅ upsert using stock symbol
+                if price is not None and prev_close is not None:
+                    change = round(price - prev_close, 2)
+
+                    # Upsert price
                     supabase.table("live_prices").upsert({
                         "stock": raw_ticker,
                         "price": price,
