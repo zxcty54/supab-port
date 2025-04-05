@@ -46,7 +46,7 @@ def update_prices():
                     if price is None or prev_close is None:
                         raise Exception("Index data not available")
 
-                    change = price - prev_close
+                   change = ((price - prev_close) / prev_close) * 100
 
                 # 🔵 Stock Logic
                 else:
